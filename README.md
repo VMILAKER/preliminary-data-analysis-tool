@@ -1,4 +1,4 @@
-# Preliminary Data Analysis Appliation
+# Preliminary Data Analysis Application
 Tool for analysis .csv and .xlsx with report generation.
 
 Now two versions of that are available:

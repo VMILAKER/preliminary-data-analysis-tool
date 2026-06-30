@@ -1,6 +1,6 @@
-# Preliminary Data Analysis Application
-Tool for analysis .csv and .xlsx with report generation.
+# Streamlit preliminary data analysis tool
+This version of application supports analytics and ML engineers conduct preliminary data analysis by Pandas or PyGWalker. 
 
-Now two versions of that are available:
-- Based on Streamlit with PyGWalker support and Pandas- [Streamlit_based_version](https://github.com/VMILAKER/preliminary-data-analysis-tool/tree/primary_branch);
-- As Python class with JSON file as export one.
+As export files user can download cleaned .csv file without duplicates or review in .pdf format.
+
+! *Application might be deployed locally or with Docker container.*

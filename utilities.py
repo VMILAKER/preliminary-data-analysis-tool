@@ -243,7 +243,7 @@ def detect_outliers_isolation_forest(df, contamination=0.05, random_state=42):
     outlier_idx = num_df.index[mask_outliers]
     outliers_df = df.loc[outlier_idx].copy()
     outliers_df["anomaly_score"] = scores[mask_outliers]
-    return outliers_df, model
+    return outliers_df
 
 
 def get_df_info(df):
@@ -277,7 +277,8 @@ def plot_histograms(df):
             axes[i].text(0.5, 0.5, f"Колонка '{col}' содержит менее 2 уникальных значений",
                          ha='center', va='center', transform=axes[i].transAxes, fontsize=10)
             continue
-        axes[i].hist(series, bins=30, edgecolor='black', alpha=0.7, color='steelblue')
+        axes[i].hist(series, bins=30, edgecolor='black',
+                     alpha=0.7, color='steelblue')
         axes[i].set_title(col, fontsize=11)
         axes[i].set_xlabel('')
         axes[i].set_ylabel('Частота')
@@ -313,7 +314,8 @@ def data_quality_report(df):
             data_type = "Категориальная/Текст"
             problems = []
             if nunique == total and total > 100:
-                problems.append("Высокая кардинальность (уникальный идентификатор)")
+                problems.append(
+                    "Высокая кардинальность (уникальный идентификатор)")
             elif nunique == 1:
                 problems.append("Константа")
         report_rows.append({
@@ -338,10 +340,12 @@ def plot_missing_matrix(df):
     missing_matrix = sample_df[all_cols].isna().astype(int)
     if missing_matrix.sum().sum() == 0:
         return None
-    fig, ax = plt.subplots(figsize=(max(6, len(all_cols) * 0.4), max(4, len(sample_df) * 0.002)))
+    fig, ax = plt.subplots(
+        figsize=(max(6, len(all_cols) * 0.4), max(4, len(sample_df) * 0.002)))
     sns.heatmap(missing_matrix.T, cbar=False, cmap=["#f0f0f0", "#d32f2f"],
                 ax=ax, yticklabels=True, xticklabels=False)
-    ax.set_title("Матрица пропусков (красный — пропуск, серый — значение)", fontsize=11)
+    ax.set_title(
+        "Матрица пропусков (красный — пропуск, серый — значение)", fontsize=11)
     ax.set_xlabel("Строки (выборка до 5000)" if len(df) >= 5000 else "Строки")
     ax.set_ylabel("Колонки")
     plt.tight_layout()
@@ -384,27 +388,6 @@ def missing_values_statistics(df):
     return pd.DataFrame(rows)
 
 
-def detect_outliers_isolation_forest(df, contamination=0.05, random_state=42):
-    num_df = df.select_dtypes(include=[np.number]).dropna()
-    if num_df.shape[0] == 0 or num_df.shape[1] < 2:
-        return pd.DataFrame(), None
-
-    model = IsolationForest(
-        contamination=contamination,
-        random_state=random_state,
-        n_estimators=100,
-        n_jobs=-1,
-    )
-    preds = model.fit_predict(num_df)
-    scores = model.decision_function(num_df)
-
-    mask_outliers = preds == -1
-    outlier_idx = num_df.index[mask_outliers]
-    outliers_df = df.loc[outlier_idx].copy()
-    outliers_df["anomaly_score"] = scores[mask_outliers]
-    return outliers_df, model
-
-
 def export_csv(dataframe):
     return dataframe.to_csv(index=False)
 
@@ -420,13 +403,17 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
 
         # Лист 2: Информация о файле
         info_df = pd.DataFrame([
-            {"Параметр": "Имя файла", "Значение": info_dict.get("file_name", "—")},
+            {"Параметр": "Имя файла",
+                "Значение": info_dict.get("file_name", "—")},
             {"Параметр": "Формат", "Значение": info_dict.get("format", "—")},
             {"Параметр": "Строк", "Значение": df.shape[0]},
             {"Параметр": "Столбцов", "Значение": df.shape[1]},
-            {"Параметр": "Разделитель", "Значение": info_dict.get("separator", "—")},
-            {"Параметр": "Кодировка", "Значение": info_dict.get("encoding", "—")},
-            {"Параметр": "Заголовок сгенерирован", "Значение": "Да" if info_dict.get("header_generated") else "Нет"},
+            {"Параметр": "Разделитель",
+                "Значение": info_dict.get("separator", "—")},
+            {"Параметр": "Кодировка",
+                "Значение": info_dict.get("encoding", "—")},
+            {"Параметр": "Заголовок сгенерирован",
+                "Значение": "Да" if info_dict.get("header_generated") else "Нет"},
         ])
         info_df.to_excel(writer, sheet_name='Инфо', index=False)
 

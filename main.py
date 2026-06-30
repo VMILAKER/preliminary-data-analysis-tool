@@ -22,8 +22,6 @@ def configure_streamlit():
             "Выберите файл",
             type=["csv", "xlsx", "xls"],
         )
-        # pyg_button = st.button("PyGWalker")
-        # reset_button = st.button("Кастомный вариант")
 
     # Access to DataFrame
     if uploaded_file is None:

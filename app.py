@@ -77,12 +77,13 @@ def histogram_distributions(df):
 def data_quality_section(df):
     st.subheader("Отчёт о качестве данных")
     quality_df = util.data_quality_report(df)
-    st.dataframe(quality_df, use_container_width=True)
+    st.dataframe(quality_df, use_container_width=False)
 
     total_problems = quality_df[quality_df["Проблемы"] != "—"].shape[0]
     total_cols = len(quality_df)
     if total_problems > 0:
-        st.warning(f"Обнаружено **{total_problems}** колонок с потенциальными проблемами из **{total_cols}**.")
+        st.warning(
+            f"Обнаружено **{total_problems}** колонок с потенциальными проблемами из **{total_cols}**.")
     else:
         st.success(f"Все **{total_cols}** колонок не имеют явных проблем.")
 
@@ -132,7 +133,7 @@ def outliers_iqr_search(df):
         st.dataframe(outliers_df)
         with st.expander("Обнаружение выбросов с помощью Boxplot", expanded=False):
             numeric_cols = [
-                c for c in df.select_dtypes(include=[np.number]).columns if df[c].nunique() >= 5
+                column for column in df.select_dtypes(include=[np.number]).columns if df[column].nunique() >= 5
             ]
             if not numeric_cols:
                 st.info(
@@ -165,7 +166,7 @@ def outliers_isolation_forest_search(df):
         key="if_contamination",
     )
 
-    ifo_outliers, ifo_model = util.detect_outliers_isolation_forest(
+    ifo_outliers = util.detect_outliers_isolation_forest(
         df, contamination=contamination
     )
 
@@ -175,7 +176,7 @@ def outliers_isolation_forest_search(df):
         pct = round(len(ifo_outliers) / rows_before * 100, 2)
         st.write(
             f"**Найдено выбросов:** {len(ifo_outliers)} из {rows_before} ({pct}%)")
-        st.dataframe(ifo_outliers.head(100))
+        st.dataframe(ifo_outliers.head(100), use_container_width=True)
 
         if st.button("Удалить найденные выбросы (Isolation Forest)"):
             st.session_state.df.drop(
@@ -240,13 +241,13 @@ def main(df, info):
     miss_df = util.missing_values_statistics(df)
     desc_df = util.get_df_describe(df)
     iqr_df = util.detect_outliers_iqr(df)
-    ifo_outliers, _ = util.detect_outliers_isolation_forest(df)
+    ifo_outliers = util.detect_outliers_isolation_forest(df)
 
     excel_buffer = util.export_excel_report(
         df, prof_df, quality_df, miss_df, iqr_df, ifo_outliers, desc_df, info
     )
     st.download_button(
-        label="Скачать Excel-отчёт (8 листов)",
+        label="Скачать полный Excel-отчёт (8 листов)",
         data=excel_buffer,
         file_name=excel_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

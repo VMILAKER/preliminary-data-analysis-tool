@@ -4,3 +4,13 @@ This version of application supports analytics and ML engineers conduct prelimin
 As export files user can download cleaned .csv file without duplicates or review in .pdf format.
 
 ! *Application might be deployed locally or with Docker container.*
+
+## Fast start
+```
+#1. Copy .env.example to .env
+cp .env.example .env
+#2. Build Docker container
+docker compose build
+#3. Pick up the container
+docker compose up
+```

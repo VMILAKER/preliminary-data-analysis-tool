@@ -1,0 +1,18 @@
+services:
+  app:
+    container_name: preliminary_analysis_tool
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - db
+    volumes:
+    - ./app:/preliminary_analysis_tool/app
+    ports:
+    - '${STREAMLIT_PORT}:STREAMLIT_PORT'
+    healthcheck:
+      test: ["CMD-SHELL", "curl", '--fail', 'http://localhost:${STREAMLIT_PORT}/_stcore/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always

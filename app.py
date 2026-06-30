@@ -183,7 +183,7 @@ def outliers_isolation_forest_search(df):
                 index=ifo_outliers.index, inplace=True)
             if st.session_state.df.empty:
                 st.warning("Все строки удалены. Загрузите новый файл.")
-            st.rerun()
+            st.experimental_rerun()
 
 
 def create_pdf_review(df_list: list, filename: str):

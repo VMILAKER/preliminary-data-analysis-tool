@@ -7,10 +7,12 @@ As export files user can download cleaned .csv file without duplicates or review
 
 ## Fast start
 ```
-#1. Copy .env.example to .env
+# 1. Copy .env.example to .env
 cp .env.example .env
-#2. Build Docker container
+
+# 2. Build Docker container
 docker compose build
-#3. Pick up the container
+
+# 3. Pick up the container
 docker compose up
 ```

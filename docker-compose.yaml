@@ -4,8 +4,6 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    volumes:
-    - ./:/preliminary_analysis_tool/
     ports:
     - '${STREAMLIT_PORT}:${STREAMLIT_PORT}'
     healthcheck:

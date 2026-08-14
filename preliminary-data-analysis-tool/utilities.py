@@ -409,7 +409,9 @@ def export_csv(dataframe):
     return dataframe.to_csv(index=False)
 
 
-def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_df, info_dict):
+def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_df, info_dict,
+                        mixed_types_df=None, date_columns_df=None,
+                        special_patterns_df=None):
     """Экспорт полного отчёта в Excel с несколькими листами"""
     from io import BytesIO
     output = BytesIO()
@@ -459,7 +461,16 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
             ifo_df.to_excel(writer, sheet_name='Выбросы_IF', index=False)
         else:
             pd.DataFrame({"Сообщение": ["Выбросы Isolation Forest не обнаружены"]}).to_excel(
-                writer, sheet_name='Выбросы_IF', index=False)
+                reader, sheet_name='Выбросы_IF', index=False)
+
+        if mixed_types_df is not None and not mixed_types_df.empty:
+            mixed_types_df.to_excel(writer, sheet_name='Структурные_ошибки', index=False)
+
+        if date_columns_df is not None and not date_columns_df.empty:
+            date_columns_df.to_excel(writer, sheet_name='Колонки_с_датами', index=False)
+
+        if special_patterns_df is not None and not special_patterns_df.empty:
+            special_patterns_df.to_excel(writer, sheet_name='Паттерны_тел_email', index=False)
 
     output.seek(0)
     return output

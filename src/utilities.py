@@ -11,7 +11,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Image, Paragraph, Table
 from sklearn.ensemble import IsolationForest
 
-import config
+from src import config
 
 
 def guess_csv_params(file_bytes):
@@ -19,7 +19,6 @@ def guess_csv_params(file_bytes):
     encoding = detected.get("encoding", "utf-8") or "utf-8"
     if encoding.lower() in ("iso-8859-1", "windows-1252"):
         encoding = "cp1251"
-
     try:
         text_sample = file_bytes[:10000].decode(encoding, errors="replace")
         sniffer = csv.Sniffer()
@@ -107,10 +106,8 @@ def load_dataframe(uploaded_file):
                 None,
                 f"Неподдерживаемый формат: .{file_ext}. Допустимы CSV, XLSX, XLS.",
             )
-
     except Exception as e:
         return None, f"Ошибка при чтении файла: {e}"
-
     return df, info
 
 
@@ -170,7 +167,7 @@ def plot_missing_values(df):
         xaxis_title="% пропусков",
         yaxis_title="Колонка",
         height=250 + 25 * len(prof),
-        margin=dict(l=20, r=20, t=40, b=20),
+        margin={"l": 20, "r": 20, "t": 40, "b": 20},
     )
     fig.add_vline(x=50, line_dash="dash",
                   line_color="red", annotation_text="50%")
@@ -243,7 +240,7 @@ def detect_outliers_isolation_forest(df, contamination=0.05, random_state=42):
     outlier_idx = num_df.index[mask_outliers]
     outliers_df = df.loc[outlier_idx].copy()
     outliers_df["anomaly_score"] = scores[mask_outliers]
-    return outliers_df
+    return outliers_df, model
 
 
 def get_df_info(df):
@@ -333,7 +330,7 @@ def data_quality_report(df):
 
 def plot_missing_matrix(df):
     """Тепловая карта пропусков (бинарная матрица: 1 — пропуск, 0 — значение)"""
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    # numeric_cols = df.select_dtypes(include=[np.number]).columns
     all_cols = df.columns
     # Для больших данных сэмплируем
     sample_df = df if len(df) < 5000 else df.sample(5000, random_state=42)
@@ -392,7 +389,9 @@ def export_csv(dataframe):
     return dataframe.to_csv(index=False)
 
 
-def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_df, info_dict):
+def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_df, info_dict,
+                        mixed_types_df=None, date_columns_df=None,
+                        special_patterns_df=None):
     """Экспорт полного отчёта в Excel с несколькими листами"""
     from io import BytesIO
     output = BytesIO()
@@ -447,6 +446,18 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
         else:
             pd.DataFrame({"Сообщение": ["Выбросы Isolation Forest не обнаружены"]}).to_excel(
                 writer, sheet_name='Выбросы_IF', index=False)
+
+        if mixed_types_df is not None and not mixed_types_df.empty:
+            mixed_types_df.to_excel(
+                writer, sheet_name='Структурные_ошибки', index=False)
+
+        if date_columns_df is not None and not date_columns_df.empty:
+            date_columns_df.to_excel(
+                writer, sheet_name='Колонки_с_датами', index=False)
+
+        if special_patterns_df is not None and not special_patterns_df.empty:
+            special_patterns_df.to_excel(
+                writer, sheet_name='Паттерны_тел_email', index=False)
 
     output.seek(0)
     return output

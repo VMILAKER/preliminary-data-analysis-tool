@@ -1,20 +1,22 @@
 import numpy as np
+import pandas as pd
 import streamlit as st
 from pygwalker.api.streamlit import StreamlitRenderer
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import Paragraph, SimpleDocTemplate
 
-import config
-import utilities as util
+import src.data_validator as dv
+import src.utilities as util
+from src import config
+
+
+@st.cache_resource
+def get_pygwalker_renderer(data):
+    return StreamlitRenderer(data, spec_io_mode="rw")
 
 
 def use_pygwalker(df):
     with st.expander("Интерактивное исследование данных (PyGWalker)", expanded=True):
-
-        @st.cache_resource
-        def get_pygwalker_renderer(data):
-            return StreamlitRenderer(data, spec_io_mode="rw")
-
         try:
             renderer = get_pygwalker_renderer(df)
             renderer.explorer()
@@ -77,7 +79,7 @@ def histogram_distributions(df):
 def data_quality_section(df):
     st.subheader("Отчёт о качестве данных")
     quality_df = util.data_quality_report(df)
-    st.dataframe(quality_df, use_container_width=False)
+    st.dataframe(quality_df, use_container_width=True)
 
     total_problems = quality_df[quality_df["Проблемы"] != "—"].shape[0]
     total_cols = len(quality_df)
@@ -133,7 +135,7 @@ def outliers_iqr_search(df):
         st.dataframe(outliers_df)
         with st.expander("Обнаружение выбросов с помощью Boxplot", expanded=False):
             numeric_cols = [
-                column for column in df.select_dtypes(include=[np.number]).columns if df[column].nunique() >= 5
+                c for c in df.select_dtypes(include=[np.number]).columns if df[c].nunique() >= 5
             ]
             if not numeric_cols:
                 st.info(
@@ -166,7 +168,7 @@ def outliers_isolation_forest_search(df):
         key="if_contamination",
     )
 
-    ifo_outliers = util.detect_outliers_isolation_forest(
+    ifo_outliers, _ = util.detect_outliers_isolation_forest(
         df, contamination=contamination
     )
 
@@ -176,14 +178,101 @@ def outliers_isolation_forest_search(df):
         pct = round(len(ifo_outliers) / rows_before * 100, 2)
         st.write(
             f"**Найдено выбросов:** {len(ifo_outliers)} из {rows_before} ({pct}%)")
-        st.dataframe(ifo_outliers.head(100), use_container_width=True)
+        st.dataframe(ifo_outliers.head(100))
 
         if st.button("Удалить найденные выбросы (Isolation Forest)"):
             st.session_state.df.drop(
                 index=ifo_outliers.index, inplace=True)
             if st.session_state.df.empty:
                 st.warning("Все строки удалены. Загрузите новый файл.")
-            # st.rerun()
+            st.rerun()
+
+
+def validation_section(df):
+    st.subheader("Валидация данных")
+
+    with st.expander("Индекс качества данных (DQI)", expanded=True):
+        iqr_df = util.detect_outliers_iqr(df)
+        dqi_score, dqi_details = dv.compute_dqi(df, iqr_df)
+        col1, col2, col3 = st.columns([1, 2, 2])
+        score_color = "green" if dqi_score >= 70 else (
+            "orange" if dqi_score >= 50 else "red")
+        col1.markdown(
+            f"<h2 style='color:{score_color}; font-size:48px; margin:0'>{dqi_score:.1f}%</h2>"
+            f"<p style='font-size:16px;'><b>{dqi_details['dqi_grade']}</b></p>",
+            unsafe_allow_html=True,
+        )
+        with col2:
+            st.markdown(f"**{dqi_details['completeness_desc']}**")
+            st.markdown(f"**{dqi_details['uniqueness_desc']}**")
+            st.markdown(f"**{dqi_details['no_constants_desc']}**")
+            st.markdown(f"**{dqi_details['type_consistency_desc']}**")
+        with col3:
+            st.markdown(f"**{dqi_details['no_outliers_desc']}**")
+            st.markdown(f"**{dqi_details['cardinality_desc']}**")
+            st.markdown(f"**{dqi_details['row_completeness_desc']}**")
+
+        weights_df = pd.DataFrame([
+            {"Метрика": "Заполненность", "Вес": "30%", "Оценка": f"{dqi_details['completeness']:.1f}%",
+             "Вклад": f"{dqi_details['completeness'] * 0.30:.2f}%"},
+            {"Метрика": "Уникальность (нет дубликатов)", "Вес": "15%", "Оценка": f"{dqi_details['uniqueness']:.1f}%",
+             "Вклад": f"{dqi_details['uniqueness'] * 0.15:.2f}%"},
+            {"Метрика": "Нет констант", "Вес": "10%", "Оценка": f"{dqi_details['no_constants']:.1f}%",
+             "Вклад": f"{dqi_details['no_constants'] * 0.10:.2f}%"},
+            {"Метрика": "Целостность типов", "Вес": "15%", "Оценка": f"{dqi_details['type_consistency']:.1f}%",
+             "Вклад": f"{dqi_details['type_consistency'] * 0.15:.2f}%"},
+            {"Метрика": "Нет выбросов", "Вес": "10%", "Оценка": f"{dqi_details['no_outliers']:.1f}%",
+             "Вклад": f"{dqi_details['no_outliers'] * 0.10:.2f}%"},
+            {"Метрика": "Кардинальность", "Вес": "10%", "Оценка": f"{dqi_details['cardinality']:.1f}%",
+             "Вклад": f"{dqi_details['cardinality'] * 0.10:.2f}%"},
+            {"Метрика": "Строки без пропусков", "Вес": "10%", "Оценка": f"{dqi_details['row_completeness']:.1f}%",
+             "Вклад": f"{dqi_details['row_completeness'] * 0.10:.2f}%"},
+        ])
+        st.dataframe(weights_df, use_container_width=True)
+
+    mixed_df = dv.detect_mixed_types(df)
+    with st.expander("Структурные ошибки (смешанные типы)", expanded=not mixed_df.empty):
+        if not mixed_df.empty:
+            st.warning(
+                f"Обнаружено **{len(mixed_df)}** колонок со смешанными типами.")
+            st.dataframe(mixed_df, use_container_width=True)
+        else:
+            st.success("Смешанных типов не обнаружено.")
+
+    date_df = dv.detect_date_columns(df)
+    with st.expander("Колонки с датами", expanded=not date_df.empty):
+        if not date_df.empty:
+            st.dataframe(date_df, use_container_width=True)
+        else:
+            st.info("Колонок с датами не обнаружено.")
+
+    patterns_df = dv.detect_special_patterns(df)
+    with st.expander("Специальные паттерны (телефоны, email, URL, даты)", expanded=not patterns_df.empty):
+        if not patterns_df.empty:
+            st.dataframe(patterns_df, use_container_width=True)
+            total_phones = patterns_df["Телефоны"].sum()
+            total_emails = patterns_df["Email"].sum()
+            total_urls = patterns_df["URL"].sum()
+            st.caption(
+                f"Всего: телефонов {total_phones}, email {total_emails}, URL {total_urls}")
+        else:
+            st.info("Специальных паттернов не обнаружено.")
+
+    miss_patterns = dv.missing_pattern_report(df)
+    with st.expander("Паттерны пропусков", expanded=False):
+        if "row_summary" in miss_patterns and not miss_patterns["row_summary"].empty:
+            st.write("**Распределение пропусков по строкам:**")
+            st.dataframe(miss_patterns["row_summary"],
+                         use_container_width=True)
+        if "pair_corr" in miss_patterns and not miss_patterns["pair_corr"].empty:
+            st.write("**Попарная корреляция NaN (только |r| > 0.3):**")
+            st.dataframe(miss_patterns["pair_corr"], use_container_width=True)
+        if "top_missing_rows" in miss_patterns and not miss_patterns["top_missing_rows"].empty:
+            st.write("**Строки с наибольшим числом пропусков:**")
+            st.dataframe(
+                miss_patterns["top_missing_rows"], use_container_width=True)
+
+    return mixed_df, date_df, patterns_df, miss_patterns
 
 
 def create_pdf_review(df_list: list, filename: str):
@@ -227,6 +316,7 @@ def main(df, info):
     histogram_distributions(df)
     data_quality_section(df)
     missing_analysis(df)
+    validation_section(df)
     corr_visaulization(df)
     outliers_iqr_search(df)
     outliers_isolation_forest_search(df)
@@ -236,18 +326,23 @@ def main(df, info):
     base_name = info.get("file_name", "data")
     excel_name = base_name.rsplit(".", 1)[0] + "_report.xlsx"
 
-    # Собираем все датафреймы для экспорта
+    # Collect all dataframes for export
     quality_df = util.data_quality_report(df)
     miss_df = util.missing_values_statistics(df)
     desc_df = util.get_df_describe(df)
     iqr_df = util.detect_outliers_iqr(df)
-    ifo_outliers = util.detect_outliers_isolation_forest(df)
+    ifo_outliers, _ = util.detect_outliers_isolation_forest(df)
+    mixed_df = dv.detect_mixed_types(df)
+    date_df = dv.detect_date_columns(df)
+    patterns_df = dv.detect_special_patterns(df)
 
     excel_buffer = util.export_excel_report(
-        df, prof_df, quality_df, miss_df, iqr_df, ifo_outliers, desc_df, info
+        df, prof_df, quality_df, miss_df, iqr_df, ifo_outliers, desc_df, info,
+        mixed_types_df=mixed_df, date_columns_df=date_df,
+        special_patterns_df=patterns_df,
     )
     st.download_button(
-        label="Скачать полный Excel-отчёт (8 листов)",
+        label="Скачать Excel-отчёт (11 листов)",
         data=excel_buffer,
         file_name=excel_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

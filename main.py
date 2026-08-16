@@ -1,7 +1,7 @@
 import streamlit as st
 
-import app
-import utilities as util
+import src.utilities as util
+from src import app
 
 
 def configure_streamlit():

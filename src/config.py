@@ -1,11 +1,21 @@
 import os
 
+from dotenv import load_dotenv
 from reportlab.lib import colors
 from reportlab.lib.styles import (TA_CENTER, TA_JUSTIFY, TA_LEFT,
                                   ParagraphStyle, getSampleStyleSheet)
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import TableStyle
+
+load_dotenv()
+
+
+def get_streamlit_port():
+    streamlit_port = os.getenv('STREAMLIT_PORT') if os.getenv(
+        'STREAMLIT_PORT') else None
+    if streamlit_port is not None:
+        return streamlit_port
 
 
 class TextStyle:

@@ -104,9 +104,10 @@ def load_dataframe(uploaded_file):
         elif file_ext in ("json"):
             info["separator"] = "—"
             info["encoding"] = "—"
-            uploaded_file.seek(0)
+            # uploaded_file.seek(0)
             try:
-                df = pd.read_json(uploaded_file)
+                df = pd.read_json(
+                    uploaded_file, dtype='dict', encoding="utf-8")
                 if df.columns.tolist() == list(range(df.shape[1])):
                     df.columns = [f"col_{i}" for i in range(df.shape[1])]
                     info["header_generated"] = True

@@ -101,10 +101,24 @@ def load_dataframe(uploaded_file):
                 info["header_generated"] = True
             else:
                 info["header_generated"] = False
+        elif file_ext in ("json"):
+            info["separator"] = "—"
+            info["encoding"] = "—"
+            uploaded_file.seek(0)
+            try:
+                df = pd.read_json(uploaded_file)
+                if df.columns.tolist() == list(range(df.shape[1])):
+                    df.columns = [f"col_{i}" for i in range(df.shape[1])]
+                    info["header_generated"] = True
+                else:
+                    info["header_generated"] = False
+            except Exception:
+                raise Exception(
+                    "Ошибка при чтении JSON-файла. Убедитесь, что файл корректный.")
         else:
             return (
                 None,
-                f"Неподдерживаемый формат: .{file_ext}. Допустимы CSV, XLSX, XLS.",
+                f"Неподдерживаемый формат: .{file_ext}. Допустимы CSV, XLSX, XLS, JSON.",
             )
     except Exception as e:
         return None, f"Ошибка при чтении файла: {e}"

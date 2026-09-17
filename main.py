@@ -14,13 +14,13 @@ def configure_streamlit():
 
     st.title("Инструмент для предварительного анализа данных")
     st.markdown(
-        "Загрузите CSV или Excel-файл для автоматического профилирования.")
+        "Загрузите CSV, Excel-файл или JSON для автоматического профилирования.")
 
     with st.sidebar:
         st.header("Загрузка файла")
         uploaded_file = st.file_uploader(
             "Выберите файл",
-            type=["csv", "xlsx", "xls"],
+            type=["csv", "xlsx", "xls", "json"],
         )
 
     # Access to DataFrame

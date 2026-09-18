@@ -3,20 +3,7 @@ from datetime import datetime
 
 import pandas as pd
 
-_DATE_FORMATS = [
-    "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%Y/%m/%d",
-    "%d-%m-%Y", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M",
-    "%Y-%m-%dT%H:%M:%S", "%Y%m%d", "%d.%m.%y",
-    "%Y-%m-%d %H:%M", "%b %d %Y", "%B %d, %Y",
-]
-
-_PHONE_CLEAN_RE = re.compile(r"[\s\-\(\)\.]")
-_PHONE_PATTERNS = [
-    re.compile(r"^\+?7\d{10}$"), re.compile(r"^8\d{10}$"),
-    re.compile(r"^\+?1\d{10}$"), re.compile(r"^\d{10,15}$"),
-]
-_EMAIL_RE = re.compile(r"^[\w\.\+\-]+@[\w\-]+(\.[\w\-]+)+$")
-_URL_RE = re.compile(r"^https?://[^\s/$.?#][^\s]*$", re.IGNORECASE)
+import config
 
 
 def _try_parse_date(string):
@@ -25,7 +12,7 @@ def _try_parse_date(string):
     string = string.strip()
     if len(string) > 25:
         return None
-    for fmt in _DATE_FORMATS:
+    for fmt in config._DATE_FORMATS:
         try:
             return datetime.strptime(string, fmt)
         except ValueError:
@@ -45,13 +32,13 @@ def _classify_value(val):
         return "float"
     if _try_parse_date(s):
         return "date"
-    if _EMAIL_RE.match(s):
+    if config._EMAIL_RE.match(s):
         return "email"
-    cleaned = _PHONE_CLEAN_RE.sub("", s)
-    for pat in _PHONE_PATTERNS:
+    cleaned = config._PHONE_CLEAN_RE.sub("", s)
+    for pat in config._PHONE_PATTERNS:
         if pat.match(cleaned):
             return "phone"
-    if _URL_RE.match(s):
+    if config._URL_RE.match(s):
         return "url"
     return "text"
 
@@ -236,7 +223,7 @@ def detect_date_columns(df, threshold=0.3):
                 date_count += 1
                 if len(samples) < 3:
                     samples.append(val)
-                for fmt in _DATE_FORMATS:
+                for fmt in config._DATE_FORMATS:
                     try:
                         datetime.strptime(val.strip(), fmt)
                         formats_found.add(fmt)
@@ -267,8 +254,8 @@ def _detect_phones_in_series(series):
     fmt_map = {0: "РФ (+7)", 1: "РФ (8)", 2: "US (+1)", 3: "Generic"}
     for idx, val in series.dropna().items():
         s = str(val).strip()
-        cleaned = _PHONE_CLEAN_RE.sub("", s)
-        for i, pat in enumerate(_PHONE_PATTERNS):
+        cleaned = config._PHONE_CLEAN_RE.sub("", s)
+        for i, pat in enumerate(config._PHONE_PATTERNS):
             if pat.match(cleaned):
                 results.append((idx, s, fmt_map.get(i, "unknown")))
                 break
@@ -279,7 +266,7 @@ def _detect_emails_in_series(series):
     results = []
     for idx, val in series.dropna().items():
         s = str(val).strip()
-        if _EMAIL_RE.match(s):
+        if config._EMAIL_RE.match(s):
             results.append((idx, s))
     return results
 
@@ -299,7 +286,7 @@ def detect_special_patterns(df):
 
         for val in series.head(5000):
             s = val.strip()
-            if _URL_RE.match(s):
+            if config._URL_RE.match(s):
                 urls.append(s)
             dt = _try_parse_date(s)
             if dt is not None:
@@ -430,14 +417,3 @@ def standardize_dates(df, columns=None, target_format="%Y-%m-%d"):
     if not report_rows:
         return df_out, pd.DataFrame({"Сообщение": ["Нет сконвертированных колонок"]})
     return df_out, pd.DataFrame(report_rows)
-
-
-def full_validation_report(df, iqr_outliers_df=None):
-    dqi_score, dqi_details = compute_dqi(df, iqr_outliers_df)
-    return {
-        "dqi": (dqi_score, dqi_details),
-        "mixed_types": detect_mixed_types(df),
-        "date_columns": detect_date_columns(df),
-        "special_patterns": detect_special_patterns(df),
-        "missing_patterns": missing_pattern_report(df),
-    }

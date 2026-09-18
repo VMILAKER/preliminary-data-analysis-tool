@@ -146,6 +146,15 @@ def _needs_header_fix(df):
 
 
 def profile_dataframe(df):
+    problem_cols = []
+    for col in df.columns:
+        sample = df[col].dropna().head(10)
+        if sample.apply(lambda x: isinstance(x, dict)).any():
+            problem_cols.append(col)
+
+    if problem_cols:
+        raise ValueError(f"В столбцах {problem_cols} обнаружены словари — они ломают nunique()")
+    
     rows = []
     for col in df.columns:
         missing = int(df[col].isna().sum())

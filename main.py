@@ -22,6 +22,12 @@ def configure_streamlit():
             "Выберите файл",
             type=["csv", "xlsx", "xls", "json"],
         )
+        json_mode = "text"
+        if uploaded_file is not None and uploaded_file.name.lower().endswith(".json"):
+            json_mode = st.radio(
+                "Вложенные поля JSON", ["text", "flatten"],
+                format_func=lambda mode: "Преобразовать в текст" if mode == "text" else "Раскрыть в столбцы",
+            )
 
     # Access to DataFrame
     if uploaded_file is None:
@@ -33,9 +39,10 @@ def configure_streamlit():
     if (
         "df" not in st.session_state
         or st.session_state.get("uploaded_name") != uploaded_file.name
+        or st.session_state.get("json_mode") != json_mode
     ):
         with st.spinner("Загрузка и анализ файла..."):
-            result = util.load_dataframe(uploaded_file)
+            result = util.load_dataframe(uploaded_file, json_mode=json_mode)
 
         if result is None or (isinstance(result, tuple) and result[0] is None):
             error_msg = (
@@ -54,6 +61,7 @@ def configure_streamlit():
         st.session_state.df = df
         st.session_state.info = info
         st.session_state.uploaded_name = uploaded_file.name
+        st.session_state.json_mode = json_mode
 
     df = st.session_state.df
     info = st.session_state.info

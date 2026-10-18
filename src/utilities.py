@@ -1,4 +1,5 @@
 import csv
+import json
 from io import BytesIO
 
 import chardet
@@ -34,7 +35,33 @@ def guess_csv_params(file_bytes):
     return {"sep": sep, "encoding": encoding}
 
 
-def load_dataframe(uploaded_file):
+def normalize_nested_values(df, mode="text"):
+    """Make every nested value hashable without dropping rows or list items."""
+    if mode not in ("text", "flatten"):
+        raise ValueError("Неизвестный способ обработки вложенных полей JSON.")
+    if mode == "flatten":
+        # Reject ambiguous paths rather than silently overwrite a literal a.b key.
+        def flatten(record, prefix=""):
+            result = {}
+            for key, value in record.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                values = flatten(value, path) if isinstance(value, dict) and value else {path: value}
+                if result.keys() & values.keys():
+                    raise ValueError("Совпадают имена вложенных полей. Выберите преобразование в текст.")
+                result.update(values)
+            return result
+        df = pd.DataFrame([flatten(row) for row in df.to_dict("records")], index=df.index)
+    else:
+        df = df.copy(deep=True)
+    for col in df.columns:
+        df[col] = df[col].map(
+            lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True)
+            if isinstance(value, (dict, list)) else value
+        )
+    return df
+
+
+def load_dataframe(uploaded_file, json_mode="text"):
     file_name = uploaded_file.name
     file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
     file_bytes = uploaded_file.getvalue()
@@ -104,18 +131,18 @@ def load_dataframe(uploaded_file):
         elif file_ext in ("json"):
             info["separator"] = "—"
             info["encoding"] = "—"
-            # uploaded_file.seek(0)
+            uploaded_file.seek(0)
             try:
-                df = pd.read_json(
-                    uploaded_file, dtype='dict', encoding="utf-8")
+                df = pd.read_json(uploaded_file, encoding="utf-8", convert_dates=False)
+                df = normalize_nested_values(df, json_mode)
+                info["json_mode"] = json_mode
                 if df.columns.tolist() == list(range(df.shape[1])):
                     df.columns = [f"col_{i}" for i in range(df.shape[1])]
                     info["header_generated"] = True
                 else:
                     info["header_generated"] = False
-            except Exception:
-                raise Exception(
-                    "Ошибка при чтении JSON-файла. Убедитесь, что файл корректный.")
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"Ошибка при чтении JSON-файла: {exc}") from exc
         else:
             return (
                 None,
@@ -123,7 +150,8 @@ def load_dataframe(uploaded_file):
             )
     except Exception as e:
         return None, f"Ошибка при чтении файла: {e}"
-    return df, info
+    df.columns = [str(col) for col in df.columns]
+    return df.reset_index(drop=True), info
 
 
 def _needs_header_fix(df):
@@ -146,15 +174,6 @@ def _needs_header_fix(df):
 
 
 def profile_dataframe(df):
-    problem_cols = []
-    for col in df.columns:
-        sample = df[col].dropna().head(10)
-        if sample.apply(lambda x: isinstance(x, dict)).any():
-            problem_cols.append(col)
-
-    if problem_cols:
-        raise ValueError(f"В столбцах {problem_cols} обнаружены словари — они ломают nunique()")
-    
     rows = []
     for col in df.columns:
         missing = int(df[col].isna().sum())

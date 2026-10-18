@@ -82,7 +82,8 @@ def configure_streamlit():
     with tab1:
         app.main(df, info)
     with tab2:
-        app.use_pygwalker(df)
+        if st.checkbox("Открыть интерактивное исследование PyGWalker"):
+            app.use_pygwalker(df)
 
     st.caption("© Copyright Ilya Myshakov, 2026")
 

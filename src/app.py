@@ -8,6 +8,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate
 import src.data_validator as dv
 import src.utilities as util
 from src import config
+from src import analysis
 from src.session import apply_change
 
 
@@ -58,13 +59,13 @@ def corr_visaulization(df):
             st.write(fig_corr)
 
 
-def basic_overview(df):
+def basic_overview(results):
     with st.expander("Базовая информация (df.info)", expanded=False):
-        info_text = util.get_df_info(df)
+        info_text = results["info"]
         st.text(info_text)
 
     with st.expander("Статистическое описание (df.describe)", expanded=False):
-        desc_df = util.get_df_describe(df)
+        desc_df = results["describe"]
         st.dataframe(desc_df, use_container_width=True)
 
 
@@ -77,9 +78,8 @@ def histogram_distributions(df):
             st.pyplot(fig)
 
 
-def data_quality_section(df):
+def data_quality_section(quality_df):
     st.subheader("Отчёт о качестве данных")
-    quality_df = util.data_quality_report(df)
     st.dataframe(quality_df, use_container_width=True)
 
     total_problems = quality_df[quality_df["Проблемы"] != "—"].shape[0]
@@ -91,16 +91,8 @@ def data_quality_section(df):
         st.success(f"Все **{total_cols}** колонок не имеют явных проблем.")
 
 
-def missing_analysis(df):
-    with st.expander("Матрица пропусков (тепловая карта)", expanded=False):
-        fig = util.plot_missing_matrix(df)
-        if fig is None:
-            st.success("Пропуски отсутствуют — матрица пуста.")
-        else:
-            st.pyplot(fig)
-
+def missing_analysis(miss_df):
     with st.expander("Статистика и стратегия заполнения пропусков", expanded=False):
-        miss_df = util.missing_values_statistics(df)
         if miss_df.empty:
             st.success("Пропуски отсутствуют.")
         else:
@@ -125,16 +117,15 @@ def duplicate_search(df):
         st.success("Дубликаты не найдены.")
 
 
-def outliers_iqr_search(df):
+def outliers_iqr_search(df, outliers_df, show_charts):
     st.subheader("Обнаружение выбросов (IQR)")
     st.write(
         "IQR рассчитываются по формуле IQR = Q3 − Q1, где Q3- третий квартиль, Q1- первый квартиль")
-    outliers_df = util.detect_outliers_iqr(df)
     if outliers_df.empty:
         st.info("Нет колонок, удовлетворяющих условиям IQR.")
     else:
         st.dataframe(outliers_df)
-        with st.expander("Обнаружение выбросов с помощью Boxplot", expanded=False):
+        if show_charts:
             numeric_cols = [
                 c for c in df.select_dtypes(include=[np.number]).columns if df[c].nunique() >= 5
             ]
@@ -169,7 +160,7 @@ def outliers_isolation_forest_search(df):
         key="if_contamination",
     )
 
-    ifo_outliers, _ = util.detect_outliers_isolation_forest(
+    ifo_outliers = analysis.isolation_outliers(
         df, contamination=contamination
     )
 
@@ -187,12 +178,11 @@ def outliers_isolation_forest_search(df):
     return ifo_outliers
 
 
-def validation_section(df):
+def validation_section(validation):
     st.subheader("Валидация данных")
 
     with st.expander("Индекс качества данных (DQI)", expanded=True):
-        iqr_df = util.detect_outliers_iqr(df)
-        dqi_score, dqi_details = dv.compute_dqi(df, iqr_df)
+        dqi_score, dqi_details = validation["dqi"]
         col1, col2, col3 = st.columns([1, 2, 2])
         score_color = "green" if dqi_score >= 70 else (
             "orange" if dqi_score >= 50 else "red")
@@ -229,7 +219,7 @@ def validation_section(df):
         ])
         st.dataframe(weights_df, use_container_width=True)
 
-    mixed_df = dv.detect_mixed_types(df)
+    mixed_df = validation["mixed_types"]
     with st.expander("Структурные ошибки (смешанные типы)", expanded=not mixed_df.empty):
         if not mixed_df.empty:
             st.warning(
@@ -238,14 +228,14 @@ def validation_section(df):
         else:
             st.success("Смешанных типов не обнаружено.")
 
-    date_df = dv.detect_date_columns(df)
+    date_df = validation["date_columns"]
     with st.expander("Колонки с датами", expanded=not date_df.empty):
         if not date_df.empty:
             st.dataframe(date_df, use_container_width=True)
         else:
             st.info("Колонок с датами не обнаружено.")
 
-    patterns_df = dv.detect_special_patterns(df)
+    patterns_df = validation["special_patterns"]
     with st.expander("Специальные паттерны (телефоны, email, URL, даты)", expanded=not patterns_df.empty):
         if not patterns_df.empty:
             st.dataframe(patterns_df, use_container_width=True)
@@ -257,7 +247,7 @@ def validation_section(df):
         else:
             st.info("Специальных паттернов не обнаружено.")
 
-    miss_patterns = dv.missing_pattern_report(df)
+    miss_patterns = validation["missing_patterns"]
     with st.expander("Паттерны пропусков", expanded=False):
         if "row_summary" in miss_patterns and not miss_patterns["row_summary"].empty:
             st.write("**Распределение пропусков по строкам:**")
@@ -304,20 +294,30 @@ def main(df, info):
             f"Заголовок сгенерирован: {'Да' if info.get('header_generated') else 'Нет'}"
         )
 
-    prof_df = util.profile_dataframe(df)
+    with st.spinner("Расчёт статистики и проверок..."):
+        results = analysis.summarize(df)
+    prof_df = results["profile"]
+    show_charts = st.checkbox("Показать графики", value=False)
 
     st.subheader("Просмотр первых строк")
     st.dataframe(df.head(5))
 
-    basic_overview(df)
+    basic_overview(results)
     count_values_by_column(df)
-    drop_visualization(prof_df)
-    histogram_distributions(df)
-    data_quality_section(df)
-    missing_analysis(df)
-    validation_section(df)
-    corr_visaulization(df)
-    outliers_iqr_search(df)
+    if show_charts:
+        drop_visualization(prof_df)
+        histogram_distributions(df)
+        corr_visaulization(df)
+        with st.expander("Матрица пропусков (тепловая карта)"):
+            fig = util.plot_missing_matrix(df)
+            if fig is None:
+                st.success("Пропуски отсутствуют.")
+            else:
+                st.pyplot(fig)
+    data_quality_section(results["quality"])
+    missing_analysis(results["missing"])
+    validation_section(results["validation"])
+    outliers_iqr_search(df, results["iqr"], show_charts)
     ifo_outliers = outliers_isolation_forest_search(df)
     duplicate_search(df)
 
@@ -325,14 +325,15 @@ def main(df, info):
     base_name = info.get("file_name", "data")
     excel_name = base_name.rsplit(".", 1)[0] + "_report.xlsx"
 
-    # Collect all dataframes for export
-    quality_df = util.data_quality_report(df)
-    miss_df = util.missing_values_statistics(df)
-    desc_df = util.get_df_describe(df)
-    iqr_df = util.detect_outliers_iqr(df)
-    mixed_df = dv.detect_mixed_types(df)
-    date_df = dv.detect_date_columns(df)
-    patterns_df = dv.detect_special_patterns(df)
+    if not st.button("Подготовить Excel-отчёт"):
+        return
+    quality_df = results["quality"]
+    miss_df = results["missing"]
+    desc_df = results["describe"]
+    iqr_df = results["iqr"]
+    mixed_df = results["validation"]["mixed_types"]
+    date_df = results["validation"]["date_columns"]
+    patterns_df = results["validation"]["special_patterns"]
 
     excel_buffer = util.export_excel_report(
         df, prof_df, quality_df, miss_df, iqr_df, ifo_outliers, desc_df, info,
@@ -349,4 +350,5 @@ def main(df, info):
         data=excel_buffer,
         file_name=excel_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        on_click="ignore",
     )

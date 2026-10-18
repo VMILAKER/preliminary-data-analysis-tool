@@ -8,6 +8,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate
 import src.data_validator as dv
 import src.utilities as util
 from src import config
+from src.session import apply_change
 
 
 @st.cache_resource
@@ -112,13 +113,13 @@ def duplicate_search(df):
     total_dups = dup_mask.sum()
     st.write(
         f"**Полных дубликатов (повторяющиеся строки):** {total_dups} "
-        f"(из них уникальных групп: {df.duplicated(keep='first').sum()})"
+        f"(лишних строк для удаления: {df.duplicated(keep='first').sum()})"
     )
 
     if total_dups > 0:
         st.dataframe(df[dup_mask].head())
-        if st.button("Удалить все дубликаты (оставить первые вхождения)"):
-            st.session_state.df.drop_duplicates(keep="first", inplace=True)
+        if st.button(f"Удалить дубликаты: {int(df.duplicated().sum())} строк"):
+            apply_change(st.session_state, df.drop_duplicates(keep="first"), "Удаление дубликатов")
             st.rerun()
     else:
         st.success("Дубликаты не найдены.")
@@ -180,11 +181,8 @@ def outliers_isolation_forest_search(df):
             f"**Найдено выбросов:** {len(ifo_outliers)} из {rows_before} ({pct}%)")
         st.dataframe(ifo_outliers.head(100))
 
-        if st.button("Удалить найденные выбросы (Isolation Forest)"):
-            st.session_state.df.drop(
-                index=ifo_outliers.index, inplace=True)
-            if st.session_state.df.empty:
-                st.warning("Все строки удалены. Загрузите новый файл.")
+        if st.button(f"Удалить найденные выбросы: {len(ifo_outliers)} строк"):
+            apply_change(st.session_state, df.drop(index=ifo_outliers.index), "Удаление выбросов Isolation Forest")
             st.rerun()
 
 

@@ -1,11 +1,13 @@
+from hashlib import sha256
+
 import streamlit as st
 
 import src.utilities as util
 from src import app
+from src.session import clear_dataset, start_dataset, undo_change, restore_original
 
 
 def configure_streamlit():
-    df = ""
     st.set_page_config(
         page_title="Инструмент для предварительного анализа данных",
         page_icon=None,
@@ -32,14 +34,13 @@ def configure_streamlit():
     # Access to DataFrame
     if uploaded_file is None:
         st.info("Загрузите файл через боковую панель, чтобы начать анализ.")
-        if "df" in st.session_state:
-            del st.session_state.df
+        clear_dataset(st.session_state)
         return
 
+    source_id = (uploaded_file.name, sha256(uploaded_file.getvalue()).hexdigest(), json_mode)
     if (
         "df" not in st.session_state
-        or st.session_state.get("uploaded_name") != uploaded_file.name
-        or st.session_state.get("json_mode") != json_mode
+        or st.session_state.get("source_id") != source_id
     ):
         with st.spinner("Загрузка и анализ файла..."):
             result = util.load_dataframe(uploaded_file, json_mode=json_mode)
@@ -58,15 +59,24 @@ def configure_streamlit():
             st.error("Файл не содержит данных.")
             return
 
-        st.session_state.df = df
-        st.session_state.info = info
-        st.session_state.uploaded_name = uploaded_file.name
-        st.session_state.json_mode = json_mode
+        start_dataset(st.session_state, df, info, source_id)
+
+    with st.sidebar:
+        st.subheader("История очистки")
+        for change in st.session_state.changes:
+            st.caption(change)
+        if st.button("Отменить последнее действие", disabled=not st.session_state.history):
+            undo_change(st.session_state)
+            st.rerun()
+        if st.button("Вернуть исходные данные", disabled=not st.session_state.changes):
+            restore_original(st.session_state)
+            st.rerun()
 
     df = st.session_state.df
     info = st.session_state.info
-    if "state" not in st.session_state:
-        st.session_state.state = False
+    if df.empty:
+        st.warning("После очистки строк не осталось. Отмените действие или верните исходные данные.")
+        return
 
     tab1, tab2 = st.tabs(["Кастомный вариант", "PyGWalker"])
     with tab1:

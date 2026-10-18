@@ -434,14 +434,13 @@ def export_csv(dataframe):
 
 def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_df, info_dict,
                         mixed_types_df=None, date_columns_df=None,
-                        special_patterns_df=None):
+                        special_patterns_df=None, analysis_settings=None):
     """Экспорт полного отчёта в Excel с несколькими листами"""
     from io import BytesIO
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Лист 1: Данные (очищенные от дубликатов)
-        df_clean = df.drop_duplicates(keep="first")
-        df_clean.to_excel(writer, sheet_name='Данные', index=False)
+        # Preserve exactly the dataset shown in the UI, including its row indices.
+        df.to_excel(writer, sheet_name='Данные', index=True, index_label='Индекс строки')
 
         # Лист 2: Информация о файле
         info_df = pd.DataFrame([
@@ -458,6 +457,11 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
                 "Значение": "Да" if info_dict.get("header_generated") else "Нет"},
         ])
         info_df.to_excel(writer, sheet_name='Инфо', index=False)
+        if analysis_settings:
+            pd.DataFrame([
+                {"Параметр": key, "Значение": value}
+                for key, value in analysis_settings.items()
+            ]).to_excel(writer, sheet_name='Настройки', index=False)
 
         # Лист 3: Профиль колонок
         prof_df.to_excel(writer, sheet_name='Профиль', index=False)
@@ -485,7 +489,7 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
 
         # Лист 8: Выбросы Isolation Forest
         if ifo_df is not None and not ifo_df.empty:
-            ifo_df.to_excel(writer, sheet_name='Выбросы_IF', index=False)
+            ifo_df.to_excel(writer, sheet_name='Выбросы_IF', index=True, index_label='Индекс строки')
         else:
             pd.DataFrame({"Сообщение": ["Выбросы Isolation Forest не обнаружены"]}).to_excel(
                 writer, sheet_name='Выбросы_IF', index=False)

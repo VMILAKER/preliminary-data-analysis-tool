@@ -156,7 +156,7 @@ def outliers_isolation_forest_search(df):
     if num_full.shape[0] == 0 or num_full.shape[1] < 2:
         st.info(
             "Недостаточно числовых данных для Isolation Forest (нужно минимум 2 числовые колонки без пропусков).")
-        return
+        return pd.DataFrame()
 
     rows_before = len(num_full)
     rows_total = len(df)
@@ -184,6 +184,7 @@ def outliers_isolation_forest_search(df):
         if st.button(f"Удалить найденные выбросы: {len(ifo_outliers)} строк"):
             apply_change(st.session_state, df.drop(index=ifo_outliers.index), "Удаление выбросов Isolation Forest")
             st.rerun()
+    return ifo_outliers
 
 
 def validation_section(df):
@@ -317,7 +318,7 @@ def main(df, info):
     validation_section(df)
     corr_visaulization(df)
     outliers_iqr_search(df)
-    outliers_isolation_forest_search(df)
+    ifo_outliers = outliers_isolation_forest_search(df)
     duplicate_search(df)
 
     st.subheader("Экспорт")
@@ -329,7 +330,6 @@ def main(df, info):
     miss_df = util.missing_values_statistics(df)
     desc_df = util.get_df_describe(df)
     iqr_df = util.detect_outliers_iqr(df)
-    ifo_outliers, _ = util.detect_outliers_isolation_forest(df)
     mixed_df = dv.detect_mixed_types(df)
     date_df = dv.detect_date_columns(df)
     patterns_df = dv.detect_special_patterns(df)
@@ -338,9 +338,14 @@ def main(df, info):
         df, prof_df, quality_df, miss_df, iqr_df, ifo_outliers, desc_df, info,
         mixed_types_df=mixed_df, date_columns_df=date_df,
         special_patterns_df=patterns_df,
+        analysis_settings={
+            "Доля выбросов Isolation Forest": st.session_state.get("if_contamination", 0.05),
+            "Строк с полными числовыми данными": len(df.select_dtypes(include=[np.number]).dropna()),
+            "История очистки": "; ".join(st.session_state.get("changes", [])) or "Нет действий",
+        },
     )
     st.download_button(
-        label="Скачать Excel-отчёт (11 листов)",
+        label="Скачать Excel-отчёт",
         data=excel_buffer,
         file_name=excel_name,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

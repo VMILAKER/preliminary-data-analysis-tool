@@ -96,7 +96,20 @@ def missing_analysis(miss_df):
         if miss_df.empty:
             st.success("Пропуски отсутствуют.")
         else:
-            st.dataframe(miss_df, use_container_width=True)
+            st.caption("План обработки сохраняется в Excel; данные автоматически не изменяются. "
+                       "Медиана устойчива к выбросам, среднее подходит для симметричных распределений. "
+                       "ffill имеет смысл только при осмысленном порядке строк; удаление требует проверки потери информации.")
+            return st.data_editor(
+                miss_df, key="missing_plan_" + str(st.session_state.get("source_id")),
+                hide_index=True, use_container_width=True,
+                disabled=[col for col in miss_df.columns if col != "Рекомендуемая стратегия"],
+                column_config={"Рекомендуемая стратегия": st.column_config.SelectboxColumn(
+                    "Выбранная стратегия", options=["Проверить вручную", "median", "mean", "mode (мода)",
+                    "ffill (заполнить предыдущим)", "'Unknown' / 'Неизвестно'", "Удалить колонку"],
+                    required=True,
+                )},
+            )
+    return miss_df
 
 
 def duplicate_search(df):
@@ -182,6 +195,10 @@ def validation_section(validation):
     st.subheader("Валидация данных")
 
     with st.expander("Индекс качества данных (DQI)", expanded=True):
+        st.caption("DQI — эвристическая оценка по семи метрикам с весами ниже. "
+                   "IQR-выбросы требуют проверки по смыслу данных. Уникальные идентификаторы "
+                   "и бинарные признаки сами по себе не снижают оценку кардинальности. "
+                   "Константы влияют и на метрику констант, и на кардинальность.")
         dqi_score, dqi_details = validation["dqi"]
         col1, col2, col3 = st.columns([1, 2, 2])
         score_color = "green" if dqi_score >= 70 else (
@@ -315,7 +332,7 @@ def main(df, info):
             else:
                 st.pyplot(fig)
     data_quality_section(results["quality"])
-    missing_analysis(results["missing"])
+    missing_plan = missing_analysis(results["missing"])
     validation_section(results["validation"])
     outliers_iqr_search(df, results["iqr"], show_charts)
     ifo_outliers = outliers_isolation_forest_search(df)
@@ -328,7 +345,7 @@ def main(df, info):
     if not st.button("Подготовить Excel-отчёт"):
         return
     quality_df = results["quality"]
-    miss_df = results["missing"]
+    miss_df = missing_plan
     desc_df = results["describe"]
     iqr_df = results["iqr"]
     mixed_df = results["validation"]["mixed_types"]

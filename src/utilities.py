@@ -341,7 +341,7 @@ def data_quality_report(df):
             problems = []
             if nunique == total and total > 100:
                 problems.append(
-                    "Высокая кардинальность (уникальный идентификатор)")
+                    "Все значения уникальны: проверьте, является ли колонка идентификатором")
             elif nunique == 1:
                 problems.append("Константа")
         report_rows.append({
@@ -352,7 +352,8 @@ def data_quality_report(df):
             "Пропуски": missing,
             "% пропусков": missing_pct,
             "Уникальных": nunique,
-            "Проблемы": "; ".join(problems) if problems else "—"
+            "Проблемы": "; ".join(problems) if problems else "—",
+            "Примеры значений": "; ".join(df[col].dropna().astype(str).head(3).str.slice(0, 80)),
         })
     return pd.DataFrame(report_rows)
 
@@ -389,21 +390,9 @@ def missing_values_statistics(df):
             continue
         dtype = df[col].dtype
         if pd.api.types.is_numeric_dtype(dtype):
-            if missing_pct < 5:
-                strategy = "median"
-            elif missing_pct < 30:
-                strategy = "mean"
-            else:
-                strategy = "Удалить колонку (>30% пропусков)"
-        elif pd.api.types.is_datetime64_any_dtype(dtype):
-            strategy = "ffill (заполнить предыдущим)"
+            strategy = "median" if missing_pct < 30 else "Проверить вручную"
         else:
-            if missing_pct < 5:
-                strategy = "mode (мода)"
-            elif missing_pct < 30:
-                strategy = "'Unknown' / 'Неизвестно'"
-            else:
-                strategy = "Удалить колонку (>30% пропусков)"
+            strategy = "Проверить вручную"
         rows.append({
             "Колонка": col,
             "Тип": str(dtype),

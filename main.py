@@ -1,10 +1,25 @@
 from hashlib import sha256
+from io import BytesIO
 
+import pandas as pd
 import streamlit as st
 
 import src.utilities as util
 from src import app
 from src.session import clear_dataset, start_dataset, undo_change, restore_original
+
+
+@st.cache_data(show_spinner=False, max_entries=4, ttl=600)
+def read_upload(name, contents, options):
+    source = BytesIO(contents)
+    source.name = name
+    return util.load_dataframe(source, **options)
+
+
+@st.cache_data(show_spinner=False, max_entries=4, ttl=600)
+def excel_sheets(contents, extension):
+    with pd.ExcelFile(BytesIO(contents), engine="openpyxl" if extension == "xlsx" else "xlrd") as book:
+        return book.sheet_names
 
 
 def configure_streamlit():
@@ -24,12 +39,31 @@ def configure_streamlit():
             "Выберите файл",
             type=["csv", "xlsx", "xls", "json"],
         )
-        json_mode = "text"
+        options = {}
         if uploaded_file is not None and uploaded_file.name.lower().endswith(".json"):
-            json_mode = st.radio(
+            options["json_mode"] = st.radio(
                 "Вложенные поля JSON", ["text", "flatten"],
                 format_func=lambda mode: "Преобразовать в текст" if mode == "text" else "Раскрыть в столбцы",
             )
+        if uploaded_file is not None:
+            extension = uploaded_file.name.rsplit(".", 1)[-1].lower()
+            if extension in ("csv", "xlsx", "xls"):
+                options["header"] = st.selectbox(
+                    "Заголовок", ["auto", "present", "absent"],
+                    format_func=lambda value: {"auto": "Определить автоматически", "present": "Первая строка — заголовок", "absent": "Заголовка нет"}[value],
+                )
+            if extension == "csv":
+                separator = st.selectbox("Разделитель", ["Авто", ",", ";", "Табуляция", "|"])
+                options["separator"] = None if separator == "Авто" else "\t" if separator == "Табуляция" else separator
+                encoding = st.selectbox("Кодировка", ["Авто", "utf-8-sig", "utf-8", "cp1251", "windows-1252", "latin1", "utf-16"])
+                options["encoding"] = None if encoding == "Авто" else encoding
+            if extension in ("xlsx", "xls"):
+                try:
+                    sheets = excel_sheets(uploaded_file.getvalue(), extension)
+                    options["sheet_name"] = st.selectbox("Лист Excel", sheets)
+                except Exception as exc:
+                    st.error(f"Не удалось открыть книгу Excel: {exc}")
+                    return
 
     # Access to DataFrame
     if uploaded_file is None:
@@ -37,13 +71,13 @@ def configure_streamlit():
         clear_dataset(st.session_state)
         return
 
-    source_id = (uploaded_file.name, sha256(uploaded_file.getvalue()).hexdigest(), json_mode)
+    source_id = (uploaded_file.name, sha256(uploaded_file.getvalue()).hexdigest(), tuple(sorted(options.items())))
     if (
         "df" not in st.session_state
         or st.session_state.get("source_id") != source_id
     ):
         with st.spinner("Загрузка и анализ файла..."):
-            result = util.load_dataframe(uploaded_file, json_mode=json_mode)
+            result = read_upload(uploaded_file.name, uploaded_file.getvalue(), options)
 
         if result is None or (isinstance(result, tuple) and result[0] is None):
             error_msg = (
@@ -59,6 +93,11 @@ def configure_streamlit():
             st.error("Файл не содержит данных.")
             return
 
+        st.subheader("Предпросмотр загрузки")
+        st.caption(f"Строк: {len(df)}, столбцов: {len(df.columns)}. Проверьте настройки чтения в боковой панели.")
+        st.dataframe(df.head(5), use_container_width=True)
+        if not st.button("Начать анализ"):
+            return
         start_dataset(st.session_state, df, info, source_id)
 
     with st.sidebar:

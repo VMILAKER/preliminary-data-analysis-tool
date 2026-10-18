@@ -16,10 +16,13 @@ from src import config
 
 
 def guess_csv_params(file_bytes):
-    detected = chardet.detect(file_bytes)
+    detected = chardet.detect(file_bytes[:100000])
     encoding = detected.get("encoding", "utf-8") or "utf-8"
-    if encoding.lower() in ("iso-8859-1", "windows-1252"):
-        encoding = "cp1251"
+    try:
+        file_bytes.decode("utf-8-sig")
+        encoding = "utf-8-sig"
+    except UnicodeDecodeError:
+        pass
     try:
         text_sample = file_bytes[:10000].decode(encoding, errors="replace")
         sniffer = csv.Sniffer()
@@ -61,7 +64,8 @@ def normalize_nested_values(df, mode="text"):
     return df
 
 
-def load_dataframe(uploaded_file, json_mode="text"):
+def load_dataframe(uploaded_file, json_mode="text", separator=None, encoding=None,
+                   header="auto", sheet_name=0):
     file_name = uploaded_file.name
     file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
     file_bytes = uploaded_file.getvalue()
@@ -72,62 +76,42 @@ def load_dataframe(uploaded_file, json_mode="text"):
     info = {"file_name": file_name, "format": file_ext.upper()}
 
     try:
+        if header not in ("auto", "present", "absent"):
+            raise ValueError("Неизвестная настройка заголовка.")
         if file_ext in ("csv",):
             params = guess_csv_params(file_bytes)
+            params["sep"] = separator if separator is not None else params["sep"]
+            params["encoding"] = encoding or params["encoding"]
+            if len(params["sep"]) != 1:
+                raise ValueError("Разделитель должен быть одним символом.")
             info["separator"] = params["sep"]
             info["encoding"] = params["encoding"]
-            uploaded_file.seek(0)
-            try:
-                df = pd.read_csv(
-                    uploaded_file,
-                    sep=params["sep"],
-                    encoding=params["encoding"],
-                    engine="python",
-                )
-            except Exception:
-                uploaded_file.seek(0)
+            has_header = header != "absent"
+            if header == "auto":
                 try:
-                    df = pd.read_csv(
-                        uploaded_file,
-                        sep=params["sep"],
-                        encoding=params["encoding"],
-                        engine="c",
-                    )
-                except Exception:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, engine="python")
-
-            if _needs_header_fix(df):
-                uploaded_file.seek(0)
-                df = pd.read_csv(
-                    uploaded_file,
-                    sep=params["sep"],
-                    encoding=params["encoding"],
-                    header=None,
-                    engine="python",
-                )
+                    sample = file_bytes.decode(params["encoding"])[:10000]
+                    has_header = csv.Sniffer().has_header(sample)
+                except csv.Error:
+                    has_header = True
+            df = pd.read_csv(BytesIO(file_bytes), sep=params["sep"], encoding=params["encoding"],
+                             header=0 if has_header else None, engine="python")
+            info["header_generated"] = not has_header
+            if not has_header:
                 df.columns = [f"col_{i}" for i in range(df.shape[1])]
-                info["header_generated"] = True
-            else:
-                info["header_generated"] = False
 
         elif file_ext in ("xlsx", "xls"):
             info["separator"] = "—"
             info["encoding"] = "—"
-            uploaded_file.seek(0)
-            try:
-                df = pd.read_excel(
-                    uploaded_file,
-                    engine="openpyxl" if file_ext == "xlsx" else "xlrd",
-                )
-            except Exception:
-                uploaded_file.seek(0)
-                df = pd.read_excel(uploaded_file)
-            if df.columns.tolist() == list(range(df.shape[1])):
+            engine = "openpyxl" if file_ext == "xlsx" else "xlrd"
+            df = pd.read_excel(BytesIO(file_bytes), engine=engine, sheet_name=sheet_name,
+                               header=None if header == "absent" else 0)
+            if header == "absent" or (header == "auto" and _needs_header_fix(df)):
+                df = pd.read_excel(BytesIO(file_bytes), engine=engine, sheet_name=sheet_name, header=None)
                 df.columns = [f"col_{i}" for i in range(df.shape[1])]
                 info["header_generated"] = True
             else:
                 info["header_generated"] = False
+            info["sheet_name"] = sheet_name
         elif file_ext in ("json"):
             info["separator"] = "—"
             info["encoding"] = "—"
@@ -151,6 +135,8 @@ def load_dataframe(uploaded_file, json_mode="text"):
     except Exception as e:
         return None, f"Ошибка при чтении файла: {e}"
     df.columns = [str(col) for col in df.columns]
+    if not df.columns.is_unique:
+        return None, "После преобразования совпали названия столбцов. Исправьте заголовки файла."
     return df.reset_index(drop=True), info
 
 
@@ -455,6 +441,8 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
                 "Значение": info_dict.get("encoding", "—")},
             {"Параметр": "Заголовок сгенерирован",
                 "Значение": "Да" if info_dict.get("header_generated") else "Нет"},
+            {"Параметр": "Лист Excel", "Значение": info_dict.get("sheet_name", "—")},
+            {"Параметр": "Вложенные поля JSON", "Значение": info_dict.get("json_mode", "—")},
         ])
         info_df.to_excel(writer, sheet_name='Инфо', index=False)
         if analysis_settings:

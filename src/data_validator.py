@@ -103,7 +103,7 @@ def detect_mixed_types(df, sample_size=2000, min_ratio=0.05):
     return pd.DataFrame(results)
 
 
-def compute_dqi(df, iqr_outliers_df=None):
+def compute_dqi(df, iqr_outliers_df=None, mixed_types_df=None):
     if df.empty:
         return 0.0, {"error": "Датасет пуст"}
 
@@ -137,11 +137,8 @@ def compute_dqi(df, iqr_outliers_df=None):
         f"Колонок-констант: {constant_cols} из {total_cols}"
     )
 
-    try:
-        mixed_df = detect_mixed_types(df, min_ratio=0.02)
-        mixed_count = len(mixed_df)
-    except Exception:
-        mixed_count = 0
+    mixed_df = detect_mixed_types(df, min_ratio=0.02) if mixed_types_df is None else mixed_types_df
+    mixed_count = len(mixed_df)
     type_consistency = ((total_cols - mixed_count) / total_cols) * 100
     details["type_consistency"] = round(type_consistency, 2)
     details["type_consistency_desc"] = (
@@ -153,7 +150,7 @@ def compute_dqi(df, iqr_outliers_df=None):
         outlier_pcts = []
         for _, row in iqr_outliers_df.iterrows():
             total_vals = row.get("Всего значений", 0)
-            outlier_count = row.get("Кол-во выбросов", 0)
+            outlier_count = row.get("Выбросов", 0)
             if total_vals and total_vals > 0:
                 outlier_pcts.append((1 - outlier_count / total_vals) * 100)
         if outlier_pcts:
@@ -168,17 +165,11 @@ def compute_dqi(df, iqr_outliers_df=None):
         nu = df[col].nunique()
         if nu <= 1:
             bad_card += 1
-        elif pd.api.types.is_numeric_dtype(df[col]):
-            if nu < 3 and nu > 0:
-                bad_card += 1
-        else:
-            if nu == len(df[col].dropna()) and nu > 50:
-                bad_card += 1
     card_score = ((total_cols - bad_card) / total_cols) * \
         100 if total_cols > 0 else 100
     details["cardinality"] = round(card_score, 2)
     details["cardinality_desc"] = (
-        f"Колонок с проблемной кардинальностью: {bad_card} из {total_cols}"
+        f"Колонок с не более чем одним непустым значением: {bad_card} из {total_cols}"
     )
 
     rows_nan = df.isna().any(axis=1).sum()
@@ -230,7 +221,8 @@ def detect_date_columns(df, threshold=0.3):
         date_count = 0
         formats_found = set()
         samples = []
-        for val in series.head(2000):
+        sample = series.head(2000)
+        for val in sample:
             dt = _try_parse_date(val)
             if dt is not None:
                 date_count += 1
@@ -244,7 +236,7 @@ def detect_date_columns(df, threshold=0.3):
                     except ValueError:
                         continue
 
-        ratio = date_count / len(series)
+        ratio = date_count / len(sample)
         if ratio >= threshold:
             fmt_str = ", ".join(sorted(formats_found)[
                                 :3]) if formats_found else "разные"
@@ -252,6 +244,7 @@ def detect_date_columns(df, threshold=0.3):
                 "Колонка": col,
                 "Тип данных": str(df[col].dtype),
                 "Похоже на дату": date_count,
+                "Проверено значений": len(sample),
                 "Доля дат": f"{ratio*100:.1f}%",
                 "Образец формата": fmt_str,
                 "Рекомендация": (
@@ -433,10 +426,11 @@ def standardize_dates(df, columns=None, target_format="%Y-%m-%d"):
 
 
 def full_validation_report(df, iqr_outliers_df=None):
-    dqi_score, dqi_details = compute_dqi(df, iqr_outliers_df)
+    mixed_types = detect_mixed_types(df, min_ratio=0.02)
+    dqi_score, dqi_details = compute_dqi(df, iqr_outliers_df, mixed_types)
     return {
         "dqi": (dqi_score, dqi_details),
-        "mixed_types": detect_mixed_types(df),
+        "mixed_types": mixed_types,
         "date_columns": detect_date_columns(df),
         "special_patterns": detect_special_patterns(df),
         "missing_patterns": missing_pattern_report(df),

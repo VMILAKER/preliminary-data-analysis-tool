@@ -1,4 +1,5 @@
 import csv
+import json
 from io import BytesIO
 
 import chardet
@@ -15,10 +16,13 @@ from src import config
 
 
 def guess_csv_params(file_bytes):
-    detected = chardet.detect(file_bytes)
+    detected = chardet.detect(file_bytes[:100000])
     encoding = detected.get("encoding", "utf-8") or "utf-8"
-    if encoding.lower() in ("iso-8859-1", "windows-1252"):
-        encoding = "cp1251"
+    try:
+        file_bytes.decode("utf-8-sig")
+        encoding = "utf-8-sig"
+    except UnicodeDecodeError:
+        pass
     try:
         text_sample = file_bytes[:10000].decode(encoding, errors="replace")
         sniffer = csv.Sniffer()
@@ -34,7 +38,34 @@ def guess_csv_params(file_bytes):
     return {"sep": sep, "encoding": encoding}
 
 
-def load_dataframe(uploaded_file):
+def normalize_nested_values(df, mode="text"):
+    """Make every nested value hashable without dropping rows or list items."""
+    if mode not in ("text", "flatten"):
+        raise ValueError("Неизвестный способ обработки вложенных полей JSON.")
+    if mode == "flatten":
+        # Reject ambiguous paths rather than silently overwrite a literal a.b key.
+        def flatten(record, prefix=""):
+            result = {}
+            for key, value in record.items():
+                path = f"{prefix}.{key}" if prefix else str(key)
+                values = flatten(value, path) if isinstance(value, dict) and value else {path: value}
+                if result.keys() & values.keys():
+                    raise ValueError("Совпадают имена вложенных полей. Выберите преобразование в текст.")
+                result.update(values)
+            return result
+        df = pd.DataFrame([flatten(row) for row in df.to_dict("records")], index=df.index)
+    else:
+        df = df.copy(deep=True)
+    for col in df.columns:
+        df[col] = df[col].map(
+            lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True)
+            if isinstance(value, (dict, list)) else value
+        )
+    return df
+
+
+def load_dataframe(uploaded_file, json_mode="text", separator=None, encoding=None,
+                   header="auto", sheet_name=0):
     file_name = uploaded_file.name
     file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
     file_bytes = uploaded_file.getvalue()
@@ -45,77 +76,57 @@ def load_dataframe(uploaded_file):
     info = {"file_name": file_name, "format": file_ext.upper()}
 
     try:
+        if header not in ("auto", "present", "absent"):
+            raise ValueError("Неизвестная настройка заголовка.")
         if file_ext in ("csv",):
             params = guess_csv_params(file_bytes)
+            params["sep"] = separator if separator is not None else params["sep"]
+            params["encoding"] = encoding or params["encoding"]
+            if len(params["sep"]) != 1:
+                raise ValueError("Разделитель должен быть одним символом.")
             info["separator"] = params["sep"]
             info["encoding"] = params["encoding"]
-            uploaded_file.seek(0)
-            try:
-                df = pd.read_csv(
-                    uploaded_file,
-                    sep=params["sep"],
-                    encoding=params["encoding"],
-                    engine="python",
-                )
-            except Exception:
-                uploaded_file.seek(0)
+            has_header = header != "absent"
+            if header == "auto":
                 try:
-                    df = pd.read_csv(
-                        uploaded_file,
-                        sep=params["sep"],
-                        encoding=params["encoding"],
-                        engine="c",
-                    )
-                except Exception:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, engine="python")
-
-            if _needs_header_fix(df):
-                uploaded_file.seek(0)
-                df = pd.read_csv(
-                    uploaded_file,
-                    sep=params["sep"],
-                    encoding=params["encoding"],
-                    header=None,
-                    engine="python",
-                )
+                    sample = file_bytes.decode(params["encoding"])[:10000]
+                    has_header = csv.Sniffer().has_header(sample)
+                except csv.Error:
+                    has_header = True
+            df = pd.read_csv(BytesIO(file_bytes), sep=params["sep"], encoding=params["encoding"],
+                             header=0 if has_header else None, engine="python")
+            info["header_generated"] = not has_header
+            if not has_header:
                 df.columns = [f"col_{i}" for i in range(df.shape[1])]
-                info["header_generated"] = True
-            else:
-                info["header_generated"] = False
 
         elif file_ext in ("xlsx", "xls"):
             info["separator"] = "—"
             info["encoding"] = "—"
-            uploaded_file.seek(0)
-            try:
-                df = pd.read_excel(
-                    uploaded_file,
-                    engine="openpyxl" if file_ext == "xlsx" else "xlrd",
-                )
-            except Exception:
-                uploaded_file.seek(0)
-                df = pd.read_excel(uploaded_file)
-            if df.columns.tolist() == list(range(df.shape[1])):
+            engine = "openpyxl" if file_ext == "xlsx" else "xlrd"
+            df = pd.read_excel(BytesIO(file_bytes), engine=engine, sheet_name=sheet_name,
+                               header=None if header == "absent" else 0)
+            if header == "absent" or (header == "auto" and _needs_header_fix(df)):
+                df = pd.read_excel(BytesIO(file_bytes), engine=engine, sheet_name=sheet_name, header=None)
                 df.columns = [f"col_{i}" for i in range(df.shape[1])]
                 info["header_generated"] = True
             else:
                 info["header_generated"] = False
+            info["sheet_name"] = sheet_name
         elif file_ext in ("json"):
             info["separator"] = "—"
             info["encoding"] = "—"
-            # uploaded_file.seek(0)
+            uploaded_file.seek(0)
             try:
-                df = pd.read_json(
-                    uploaded_file, dtype='dict', encoding="utf-8")
+                df = pd.read_json(uploaded_file, encoding="utf-8", convert_dates=False)
+                df = normalize_nested_values(df, json_mode)
+                info["json_mode"] = json_mode
                 if df.columns.tolist() == list(range(df.shape[1])):
                     df.columns = [f"col_{i}" for i in range(df.shape[1])]
                     info["header_generated"] = True
                 else:
                     info["header_generated"] = False
-            except Exception:
-                raise Exception(
-                    "Ошибка при чтении JSON-файла. Убедитесь, что файл корректный.")
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"Ошибка при чтении JSON-файла: {exc}") from exc
         else:
             return (
                 None,
@@ -123,7 +134,10 @@ def load_dataframe(uploaded_file):
             )
     except Exception as e:
         return None, f"Ошибка при чтении файла: {e}"
-    return df, info
+    df.columns = [str(col) for col in df.columns]
+    if not df.columns.is_unique:
+        return None, "После преобразования совпали названия столбцов. Исправьте заголовки файла."
+    return df.reset_index(drop=True), info
 
 
 def _needs_header_fix(df):
@@ -146,15 +160,6 @@ def _needs_header_fix(df):
 
 
 def profile_dataframe(df):
-    problem_cols = []
-    for col in df.columns:
-        sample = df[col].dropna().head(10)
-        if sample.apply(lambda x: isinstance(x, dict)).any():
-            problem_cols.append(col)
-
-    if problem_cols:
-        raise ValueError(f"В столбцах {problem_cols} обнаружены словари — они ломают nunique()")
-    
     rows = []
     for col in df.columns:
         missing = int(df[col].isna().sum())
@@ -246,8 +251,12 @@ def create_image_reportlab(fig):
     return Image(buffer, x * inch, y * inch)
 
 
+def complete_numeric_rows(df):
+    return df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).dropna()
+
+
 def detect_outliers_isolation_forest(df, contamination=0.05, random_state=42):
-    num_df = df.select_dtypes(include=[np.number]).dropna()
+    num_df = complete_numeric_rows(df)
     if num_df.shape[0] == 0 or num_df.shape[1] < 2:
         return pd.DataFrame(), None
 
@@ -336,7 +345,7 @@ def data_quality_report(df):
             problems = []
             if nunique == total and total > 100:
                 problems.append(
-                    "Высокая кардинальность (уникальный идентификатор)")
+                    "Все значения уникальны: проверьте, является ли колонка идентификатором")
             elif nunique == 1:
                 problems.append("Константа")
         report_rows.append({
@@ -347,7 +356,8 @@ def data_quality_report(df):
             "Пропуски": missing,
             "% пропусков": missing_pct,
             "Уникальных": nunique,
-            "Проблемы": "; ".join(problems) if problems else "—"
+            "Проблемы": "; ".join(problems) if problems else "—",
+            "Примеры значений": "; ".join(df[col].dropna().astype(str).head(3).str.slice(0, 80)),
         })
     return pd.DataFrame(report_rows)
 
@@ -384,21 +394,9 @@ def missing_values_statistics(df):
             continue
         dtype = df[col].dtype
         if pd.api.types.is_numeric_dtype(dtype):
-            if missing_pct < 5:
-                strategy = "median"
-            elif missing_pct < 30:
-                strategy = "mean"
-            else:
-                strategy = "Удалить колонку (>30% пропусков)"
-        elif pd.api.types.is_datetime64_any_dtype(dtype):
-            strategy = "ffill (заполнить предыдущим)"
+            strategy = "median" if missing_pct < 30 else "Проверить вручную"
         else:
-            if missing_pct < 5:
-                strategy = "mode (мода)"
-            elif missing_pct < 30:
-                strategy = "'Unknown' / 'Неизвестно'"
-            else:
-                strategy = "Удалить колонку (>30% пропусков)"
+            strategy = "Проверить вручную"
         rows.append({
             "Колонка": col,
             "Тип": str(dtype),
@@ -415,14 +413,13 @@ def export_csv(dataframe):
 
 def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_df, info_dict,
                         mixed_types_df=None, date_columns_df=None,
-                        special_patterns_df=None):
+                        special_patterns_df=None, analysis_settings=None):
     """Экспорт полного отчёта в Excel с несколькими листами"""
     from io import BytesIO
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Лист 1: Данные (очищенные от дубликатов)
-        df_clean = df.drop_duplicates(keep="first")
-        df_clean.to_excel(writer, sheet_name='Данные', index=False)
+        # Preserve exactly the dataset shown in the UI, including its row indices.
+        df.to_excel(writer, sheet_name='Данные', index=True, index_label='Индекс строки')
 
         # Лист 2: Информация о файле
         info_df = pd.DataFrame([
@@ -437,8 +434,15 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
                 "Значение": info_dict.get("encoding", "—")},
             {"Параметр": "Заголовок сгенерирован",
                 "Значение": "Да" if info_dict.get("header_generated") else "Нет"},
+            {"Параметр": "Лист Excel", "Значение": info_dict.get("sheet_name", "—")},
+            {"Параметр": "Вложенные поля JSON", "Значение": info_dict.get("json_mode", "—")},
         ])
         info_df.to_excel(writer, sheet_name='Инфо', index=False)
+        if analysis_settings:
+            pd.DataFrame([
+                {"Параметр": key, "Значение": value}
+                for key, value in analysis_settings.items()
+            ]).to_excel(writer, sheet_name='Настройки', index=False)
 
         # Лист 3: Профиль колонок
         prof_df.to_excel(writer, sheet_name='Профиль', index=False)
@@ -466,7 +470,7 @@ def export_excel_report(df, prof_df, quality_df, miss_df, iqr_df, ifo_df, desc_d
 
         # Лист 8: Выбросы Isolation Forest
         if ifo_df is not None and not ifo_df.empty:
-            ifo_df.to_excel(writer, sheet_name='Выбросы_IF', index=False)
+            ifo_df.to_excel(writer, sheet_name='Выбросы_IF', index=True, index_label='Индекс строки')
         else:
             pd.DataFrame({"Сообщение": ["Выбросы Isolation Forest не обнаружены"]}).to_excel(
                 writer, sheet_name='Выбросы_IF', index=False)
@@ -518,6 +522,6 @@ def create_title_with_df(data_dict: dict):
 
 
 def draw_boxplot(df: pd.DataFrame, column: str):
-    plt.figure(figsize=(4, 3))
-    sns.boxplot(y=df[column])
-    return plt
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.boxplot(y=df[column], ax=ax)
+    return fig

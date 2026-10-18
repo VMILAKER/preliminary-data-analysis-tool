@@ -95,7 +95,7 @@ def configure_streamlit():
 
         st.subheader("Предпросмотр загрузки")
         st.caption(f"Строк: {len(df)}, столбцов: {len(df.columns)}. Проверьте настройки чтения в боковой панели.")
-        st.dataframe(df.head(5), use_container_width=True)
+        st.dataframe(df.head(5), width="stretch")
         if not st.button("Начать анализ"):
             return
         start_dataset(st.session_state, df, info, source_id)

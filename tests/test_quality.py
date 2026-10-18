@@ -30,3 +30,10 @@ class QualityTests(unittest.TestCase):
         score, details = dv.compute_dqi(pd.DataFrame())
         self.assertEqual(score, 0)
         self.assertIn("error", details)
+
+    def test_isolation_forest_excludes_nonfinite_rows(self):
+        frame = pd.DataFrame({"a": [1, 2, float("inf"), 4], "b": [2, 3, 4, None]})
+        self.assertEqual(util.complete_numeric_rows(frame).index.tolist(), [0, 1])
+        outliers, model = util.detect_outliers_isolation_forest(frame)
+        self.assertIsNotNone(model)
+        self.assertTrue(set(outliers.index) <= {0, 1})

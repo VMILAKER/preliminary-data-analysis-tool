@@ -251,8 +251,12 @@ def create_image_reportlab(fig):
     return Image(buffer, x * inch, y * inch)
 
 
+def complete_numeric_rows(df):
+    return df.select_dtypes(include=[np.number]).replace([np.inf, -np.inf], np.nan).dropna()
+
+
 def detect_outliers_isolation_forest(df, contamination=0.05, random_state=42):
-    num_df = df.select_dtypes(include=[np.number]).dropna()
+    num_df = complete_numeric_rows(df)
     if num_df.shape[0] == 0 or num_df.shape[1] < 2:
         return pd.DataFrame(), None
 
@@ -518,6 +522,6 @@ def create_title_with_df(data_dict: dict):
 
 
 def draw_boxplot(df: pd.DataFrame, column: str):
-    plt.figure(figsize=(4, 3))
-    sns.boxplot(y=df[column])
-    return plt
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sns.boxplot(y=df[column], ax=ax)
+    return fig

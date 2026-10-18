@@ -1,0 +1,36 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      MPLBACKEND: Agg
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pip check
+      - run: python -m unittest discover -s tests -v
+      - run: docker build -t preliminary-analysis:test .
+      - name: Check container health on a custom port
+        run: |
+          docker run -d --name analysis-check -e STREAMLIT_SERVER_PORT=8503 preliminary-analysis:test
+          for attempt in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' analysis-check)
+            if [ "$status" = healthy ]; then exit 0; fi
+            if [ "$status" = unhealthy ]; then break; fi
+            sleep 2
+          done
+          docker logs analysis-check
+          exit 1
+      - name: Container cleanup
+        if: always()
+        run: docker rm -f analysis-check || true
